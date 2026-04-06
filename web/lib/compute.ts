@@ -17,6 +17,8 @@ export interface ItemRec {
   item_id: number;
   buy_rate_lift: number;  // how much more likely vs baseline
   wr_diff: number;        // P(win|buy) - P(win|not buy) in context
+  excess_wr: number;      // wr_diff minus item's global avg WR diff (removes gold bias)
+  zscore: number;         // std deviations from item's mean WR diff across matchups
   wr_with: number;
   wr_without: number;
   games: number;          // sample size in context
@@ -36,6 +38,10 @@ export interface IndexedDraftData {
   heroTotals: Map<number, { games: number; wins: number }>;
   // (buyer, item) -> avg pairwise rate across all context heroes for this side
   baselineRates: Map<string, { enemy: number; ally: number }>;
+  // (buyer, item) -> global WR diff (no context): P(win|buy) - P(win|not buy)
+  globalWrDiff: Map<string, number>;
+  // (buyer, item) -> stddev of pairwise WR diffs across all context heroes
+  wrDiffStd: Map<string, number>;
 }
 
 export function indexDraftData(raw: DraftData): IndexedDraftData {
@@ -74,7 +80,46 @@ export function indexDraftData(raw: DraftData): IndexedDraftData {
     });
   }
 
-  return { pairwise, baselines, heroTotals, baselineRates };
+  // Pre-compute global WR diff per (buyer, item): P(win|buy) - P(win|not buy)
+  const globalWrDiff = new Map<string, number>();
+  for (const [key, { bought, won }] of baselines) {
+    const [bh] = key.split(":");
+    const ht = heroTotals.get(Number(bh));
+    if (!ht || ht.games === 0 || bought === 0) continue;
+    const wrWith = won / bought;
+    const withoutGames = ht.games - bought;
+    const withoutWins = ht.wins - won;
+    const wrWithout = withoutGames > 0 ? withoutWins / withoutGames : 0.5;
+    globalWrDiff.set(key, wrWith - wrWithout);
+  }
+
+  // Pre-compute stddev of pairwise WR diffs per (buyer, item)
+  const wrDiffStd = new Map<string, number>();
+  const wrDiffAccum = new Map<string, number[]>();
+  for (const [bh, item, ch, , games, wins] of raw.p) {
+    if (games < 3) continue;
+    const ht = heroTotals.get(Number(bh));
+    if (!ht || ht.games === 0) continue;
+    const bl = baselines.get(`${bh}:${item}`);
+    if (!bl || bl.bought === 0) continue;
+    const wrWith = wins / games;
+    const withoutGames = ht.games - bl.bought;
+    const withoutWins = ht.wins - bl.won;
+    const wrWithout = withoutGames > 0 ? withoutWins / withoutGames : 0.5;
+    const diff = wrWith - wrWithout;
+    const key = `${bh}:${item}`;
+    let arr = wrDiffAccum.get(key);
+    if (!arr) { arr = []; wrDiffAccum.set(key, arr); }
+    arr.push(diff);
+  }
+  for (const [key, diffs] of wrDiffAccum) {
+    if (diffs.length < 2) continue;
+    const mean = diffs.reduce((s, d) => s + d, 0) / diffs.length;
+    const variance = diffs.reduce((s, d) => s + (d - mean) ** 2, 0) / diffs.length;
+    wrDiffStd.set(key, Math.sqrt(variance));
+  }
+
+  return { pairwise, baselines, heroTotals, baselineRates, globalWrDiff, wrDiffStd };
 }
 
 /**
@@ -147,10 +192,19 @@ export function recommendItems(
     const withoutWins = totalWins - won;
     const wrWithout = withoutGames > 0 ? withoutWins / withoutGames : 0.5;
 
+    const wrDiff = wrWith - wrWithout;
+    const baselineKey = `${buyerHero}:${item_id}`;
+    const gDiff = data.globalWrDiff.get(baselineKey) ?? 0;
+    const std = data.wrDiffStd.get(baselineKey) ?? 0;
+    const excessWr = wrDiff - gDiff;
+    const zscore = std > 0.001 ? excessWr / std : 0;
+
     results.push({
       item_id,
       buy_rate_lift: hasContext ? Math.round(buyRateProduct * 100) / 100 : 1.0,
-      wr_diff: Math.round((wrWith - wrWithout) * 10000) / 10000,
+      wr_diff: Math.round(wrDiff * 10000) / 10000,
+      excess_wr: Math.round(excessWr * 10000) / 10000,
+      zscore: Math.round(zscore * 100) / 100,
       wr_with: Math.round(wrWith * 10000) / 10000,
       wr_without: Math.round(wrWithout * 10000) / 10000,
       games: contextGames || bought,
