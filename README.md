@@ -50,12 +50,14 @@ Raw match data is collected by the [dota-items](https://github.com/hlynurd/dota-
 
 ## Baseline Models
 
-| Model | Description |
-|---|---|
-| Popularity | Most popular items per hero, no draft context |
-| Pairwise Additive | Sum pairwise log-odds across 9 context heroes with shrinkage |
+| Model | Recall@6 | NDCG@6 | Brier | Log-Loss | Description |
+|---|---|---|---|---|---|
+| Popularity | 0.504 | 0.557 | 0.247 | 0.795 | Most popular items per hero, no context |
+| Pairwise Additive | 0.504 | 0.557 | 0.273 | 1.023 | Sum pairwise log-odds with shrinkage |
+| **Logistic Regression** | **0.506** | **0.558** | **0.241** | **0.675** | Per-item LR with 390-dim draft features |
+| LightGBM | 0.504 | 0.557 | 0.250 | 0.693 | Per-item GBM (needs more data) |
 
-More baselines (logistic regression, LightGBM, neural) coming soon.
+*Results on ~10K matches from patch 7.41a. LightGBM and Pairwise Additive need more data for pairwise signals to emerge.*
 
 ## License
 
