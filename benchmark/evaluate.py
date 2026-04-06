@@ -10,6 +10,8 @@ from benchmark.data import load_matches, temporal_split, flatten_match, NUM_HERO
 from benchmark.metrics import brier_score, log_loss, recall_at_k, ndcg_at_k
 from benchmark.models.popularity import PopularityModel
 from benchmark.models.pairwise_additive import PairwiseAdditiveModel
+from benchmark.models.logistic import LogisticModel
+from benchmark.models.gbm import GBMModel
 
 
 def collect_items(matches) -> set[int]:
@@ -95,6 +97,8 @@ def run_benchmark():
     models = {
         "Popularity": PopularityModel(),
         "Pairwise Additive": PairwiseAdditiveModel(),
+        "Logistic Regression": LogisticModel(),
+        "LightGBM": GBMModel(),
     }
 
     results = {}
