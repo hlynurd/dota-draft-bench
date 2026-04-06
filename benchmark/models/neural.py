@@ -26,9 +26,10 @@ NUM_HEROES = 200
 NUM_ITEMS = 4500  # Valve item IDs go up to ~4206
 EMBED_DIM = 32
 HIDDEN_DIM = 128
-EPOCHS = 10
-BATCH_SIZE = 512
+EPOCHS = 50  # max epochs — early stopping will cut short
+BATCH_SIZE = 1024
 LR = 1e-3
+PATIENCE = 5  # stop if no improvement for this many epochs
 
 
 class DraftItemNet(nn.Module):
@@ -131,6 +132,9 @@ class NeuralModel(ItemModel):
         optimizer = optim.Adam(self.model.parameters(), lr=LR)
         bce = nn.BCEWithLogitsLoss(reduction="mean")
 
+        best_loss = float("inf")
+        no_improve = 0
+
         for epoch in range(self.epochs):
             total_loss = 0.0
             n_batches = 0
@@ -139,7 +143,6 @@ class NeuralModel(ItemModel):
                 logits = self.model(b_buyer, b_allies, b_enemies, b_items)
 
                 buy_loss = bce(logits[:, 0], b_buy)
-                # Win loss only on positive samples (where buy_label == 1)
                 pos_mask = b_buy == 1.0
                 if pos_mask.sum() > 0:
                     win_loss = bce(logits[pos_mask, 1], b_win[pos_mask])
@@ -154,7 +157,18 @@ class NeuralModel(ItemModel):
                 n_batches += 1
 
             avg_loss = total_loss / max(n_batches, 1)
-            print(f"    Epoch {epoch+1}/{self.epochs}: loss={avg_loss:.4f}")
+            improved = avg_loss < best_loss - 0.001
+            if improved:
+                best_loss = avg_loss
+                no_improve = 0
+            else:
+                no_improve += 1
+
+            print(f"    Epoch {epoch+1}/{self.epochs}: loss={avg_loss:.4f}{'' if improved else ' (no improve)'}")
+
+            if no_improve >= PATIENCE:
+                print(f"    Early stopping at epoch {epoch+1} (no improvement for {PATIENCE} epochs)")
+                break
 
         self.model.eval()
         print(f"  [Neural] Trained on {len(buyers):,} samples, {len(self.all_items)} items")
