@@ -12,6 +12,7 @@ from benchmark.models.popularity import PopularityModel
 from benchmark.models.pairwise_additive import PairwiseAdditiveModel
 from benchmark.models.logistic import LogisticModel
 from benchmark.models.gbm import GBMModel
+from benchmark.models.neural import NeuralModel
 
 
 def collect_items(matches) -> set[int]:
@@ -99,6 +100,7 @@ def run_benchmark():
         "Pairwise Additive": PairwiseAdditiveModel(),
         "Logistic Regression": LogisticModel(),
         "LightGBM": GBMModel(),
+        "Neural (MLP)": NeuralModel(epochs=10),
     }
 
     results = {}

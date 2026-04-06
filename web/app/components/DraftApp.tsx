@@ -85,6 +85,7 @@ export default function DraftApp({ heroes, draftData, itemNames }: Props) {
     const internal = itemInternalMap.get(rec.item_id) ?? "";
     const diffColor = rec.wr_diff >= 0.005 ? "text-green-400" : rec.wr_diff <= -0.005 ? "text-red-400" : "text-zinc-500";
     const diffSign = rec.wr_diff >= 0 ? "+" : "";
+    const buyColor = rec.buy_rate_lift >= 1.2 ? "text-green-400" : rec.buy_rate_lift <= 0.8 ? "text-red-400" : "text-zinc-400";
     return (
       <div className="flex items-center gap-2 py-1 border-b border-zinc-800/50 last:border-0">
         <div className="w-7 h-5 rounded overflow-hidden bg-zinc-800 shrink-0">
@@ -93,6 +94,7 @@ export default function DraftApp({ heroes, draftData, itemNames }: Props) {
             onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
         </div>
         <span className="text-xs text-zinc-300 truncate flex-1">{name}</span>
+        <span className={`text-xs font-mono shrink-0 w-10 text-right ${buyColor}`}>{rec.buy_rate_lift.toFixed(1)}x</span>
         <span className={`text-xs font-mono shrink-0 w-12 text-right ${diffColor}`}>
           {diffSign}{(rec.wr_diff * 100).toFixed(1)}%
         </span>
@@ -102,17 +104,46 @@ export default function DraftApp({ heroes, draftData, itemNames }: Props) {
 
   function HeroRecs({ hero }: { hero: OpenDotaHero }) {
     const items = recs.get(hero.id);
+    const [sortKey, setSortKey] = useState<"wr_diff" | "buy_rate_lift">("wr_diff");
+    const [ascending, setAscending] = useState(false);
+
     if (!items || items.length === 0) return null;
+
+    const sorted = [...items].sort((a, b) => {
+      const av = a[sortKey];
+      const bv = b[sortKey];
+      return ascending ? av - bv : bv - av;
+    });
+
+    function toggleSort(key: "wr_diff" | "buy_rate_lift") {
+      if (key === sortKey) setAscending(!ascending);
+      else { setSortKey(key); setAscending(false); }
+    }
+
+    const arrow = (key: string) => key === sortKey ? (ascending ? " \u25B2" : " \u25BC") : "";
+
     return (
       <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3">
-        <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center gap-2 mb-1">
           <div className="w-8 h-5 rounded overflow-hidden">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={heroImgUrl(hero.name)} alt={hero.localized_name} className="w-full h-full object-cover object-top" loading="lazy" />
           </div>
           <span className="text-sm font-medium">{hero.localized_name}</span>
         </div>
-        {items.map(rec => <ItemCard key={rec.item_id} rec={rec} />)}
+        <div className="flex items-center gap-2 pb-1 mb-1 border-b border-zinc-800 text-[10px] text-zinc-600 font-mono">
+          <span className="w-7 shrink-0" />
+          <span className="flex-1">Item</span>
+          <button onClick={() => toggleSort("buy_rate_lift")}
+            className={`shrink-0 w-10 text-right cursor-pointer hover:text-zinc-300 ${sortKey === "buy_rate_lift" ? "text-zinc-300" : ""}`}>
+            Buy{arrow("buy_rate_lift")}
+          </button>
+          <button onClick={() => toggleSort("wr_diff")}
+            className={`shrink-0 w-12 text-right cursor-pointer hover:text-zinc-300 ${sortKey === "wr_diff" ? "text-zinc-300" : ""}`}>
+            WR Diff{arrow("wr_diff")}
+          </button>
+        </div>
+        {sorted.map(rec => <ItemCard key={rec.item_id} rec={rec} />)}
       </div>
     );
   }
