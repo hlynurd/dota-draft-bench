@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import type { OpenDotaHero } from "./HeroPicker";
 import HeroPicker from "./HeroPicker";
 import { type DraftData, type IndexedDraftData, type ItemRec, indexDraftData, recommendItems } from "@/lib/compute";
@@ -14,11 +14,23 @@ interface Props {
 
 type Side = "radiant" | "dire";
 
-export default function DraftApp({ heroes, draftData, itemNames }: Props) {
+export default function DraftApp({ heroes, draftData: serverDraftData, itemNames }: Props) {
   const [radiant, setRadiant] = useState<(OpenDotaHero | null)[]>(Array(5).fill(null));
   const [dire, setDire] = useState<(OpenDotaHero | null)[]>(Array(5).fill(null));
   const [picker, setPicker] = useState<{ side: Side; slot: number } | null>(null);
+  const [clientDraftData, setClientDraftData] = useState<DraftData | null>(serverDraftData);
+  const [loading, setLoading] = useState(!serverDraftData);
 
+  // Load draft-data.json client-side if not provided by server
+  useEffect(() => {
+    if (serverDraftData) return;
+    fetch("/draft-data.json")
+      .then(r => r.json())
+      .then((data: DraftData) => { setClientDraftData(data); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [serverDraftData]);
+
+  const draftData = clientDraftData;
   const indexed = useMemo(() => draftData ? indexDraftData(draftData) : null, [draftData]);
   const itemNameMap = useMemo(() => new Map(Object.entries(itemNames).map(([k, v]) => [Number(k), v.dname])), [itemNames]);
   const itemInternalMap = useMemo(() => new Map(Object.entries(itemNames).map(([k, v]) => [Number(k), v.name])), [itemNames]);
@@ -178,6 +190,9 @@ export default function DraftApp({ heroes, draftData, itemNames }: Props) {
       </header>
 
       <main className="flex-1 max-w-5xl mx-auto w-full p-4 flex flex-col gap-6">
+        {loading && (
+          <div className="text-center py-8 text-zinc-500 text-sm">Loading item data...</div>
+        )}
         {/* Draft input */}
         <div className="grid grid-cols-2 gap-4">
           <div>
