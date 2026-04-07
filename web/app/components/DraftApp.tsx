@@ -51,7 +51,7 @@ export default function DraftApp({ heroes, draftData: serverDraftData, itemNames
         const allyIds = filledHeroes.filter(h => h.id !== hero.id).map(h => h.id);
         if (enemyIds.length === 0 && allyIds.length === 0) continue;
         const items = recommendItems(indexed, hero.id, allyIds, enemyIds, itemNameMap);
-        result.set(hero.id, items.slice(0, 12));
+        result.set(hero.id, items.slice(0, 20));
       }
     }
     return result;

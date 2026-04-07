@@ -211,10 +211,10 @@ export function recommendItems(
     });
   }
 
-  // Sort by a composite score: wr_diff weighted by confidence
+  // Sort by excess_wr (removes gold/cost bias), weighted by confidence
   results.sort((a, b) => {
-    const scoreA = a.wr_diff * Math.min(1, a.games / 50);
-    const scoreB = b.wr_diff * Math.min(1, b.games / 50);
+    const scoreA = a.excess_wr * Math.min(1, a.games / 50);
+    const scoreB = b.excess_wr * Math.min(1, b.games / 50);
     return scoreB - scoreA;
   });
 
