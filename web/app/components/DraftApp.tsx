@@ -51,7 +51,7 @@ export default function DraftApp({ heroes, draftData: serverDraftData, itemNames
         const allyIds = filledHeroes.filter(h => h.id !== hero.id).map(h => h.id);
         if (enemyIds.length === 0 && allyIds.length === 0) continue;
         const items = recommendItems(indexed, hero.id, allyIds, enemyIds, itemNameMap);
-        result.set(hero.id, items.slice(0, 20));
+        result.set(hero.id, items);
       }
     }
     return result;
@@ -172,7 +172,9 @@ export default function DraftApp({ heroes, draftData: serverDraftData, itemNames
             Z{arrow("zscore")}
           </button>
         </div>
-        {sorted.map(rec => <ItemCard key={rec.item_id} rec={rec} />)}
+        <div className="max-h-[400px] overflow-y-auto">
+          {sorted.map(rec => <ItemCard key={rec.item_id} rec={rec} />)}
+        </div>
       </div>
     );
   }
