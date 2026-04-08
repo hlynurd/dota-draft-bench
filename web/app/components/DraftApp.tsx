@@ -13,6 +13,12 @@ interface Props {
 }
 
 type Side = "radiant" | "dire";
+type SortKey = "wr_diff" | "buy_rate_lift" | "excess_wr" | "zscore" | "games";
+
+function ci95(p: number, n: number): number {
+  if (n <= 0) return 0;
+  return 1.96 * Math.sqrt(p * (1 - p) / n);
+}
 
 export default function DraftApp({ heroes, draftData: serverDraftData, itemNames }: Props) {
   const [radiant, setRadiant] = useState<(OpenDotaHero | null)[]>(Array(5).fill(null));
@@ -21,7 +27,13 @@ export default function DraftApp({ heroes, draftData: serverDraftData, itemNames
   const [clientDraftData, setClientDraftData] = useState<DraftData | null>(serverDraftData);
   const [loading, setLoading] = useState(!serverDraftData);
 
-  // Load draft-data.json client-side if not provided by server
+  // Global filters
+  const [filterBuy, setFilterBuy] = useState(false);
+  const [filterWr, setFilterWr] = useState(false);
+  const [filterExcess, setFilterExcess] = useState(false);
+  const [filterZ, setFilterZ] = useState(false);
+  const [showCi, setShowCi] = useState(false);
+
   useEffect(() => {
     if (serverDraftData) return;
     fetch("/draft-data.json")
@@ -37,16 +49,13 @@ export default function DraftApp({ heroes, draftData: serverDraftData, itemNames
 
   const selectedIds = new Set([...radiant, ...dire].filter(Boolean).map(h => h!.id));
 
-  // Compute recs for all heroes with a filled draft
   const recs = useMemo(() => {
     if (!indexed) return new Map<number, ItemRec[]>();
     const result = new Map<number, ItemRec[]>();
-
     const sides: [typeof radiant, typeof dire][] = [[radiant, dire], [dire, radiant]];
     for (const [sideHeroes, opponents] of sides) {
       const enemyIds = opponents.filter(Boolean).map(h => h!.id);
       const filledHeroes = sideHeroes.filter(Boolean) as OpenDotaHero[];
-
       for (const hero of filledHeroes) {
         const allyIds = filledHeroes.filter(h => h.id !== hero.id).map(h => h.id);
         if (enemyIds.length === 0 && allyIds.length === 0) continue;
@@ -92,7 +101,7 @@ export default function DraftApp({ heroes, draftData: serverDraftData, itemNames
     );
   }
 
-  function ItemCard({ rec }: { rec: ItemRec }) {
+  function ItemCard({ rec, showCi: ci }: { rec: ItemRec; showCi: boolean }) {
     const name = itemNameMap.get(rec.item_id) ?? "?";
     const internal = itemInternalMap.get(rec.item_id) ?? "";
     const diffColor = rec.wr_diff >= 0.005 ? "text-green-400" : rec.wr_diff <= -0.005 ? "text-red-400" : "text-zinc-500";
@@ -101,6 +110,10 @@ export default function DraftApp({ heroes, draftData: serverDraftData, itemNames
     const excessColor = rec.excess_wr >= 0.005 ? "text-green-400" : rec.excess_wr <= -0.005 ? "text-red-400" : "text-zinc-500";
     const excessSign = rec.excess_wr >= 0 ? "+" : "";
     const zColor = rec.zscore >= 1.0 ? "text-green-400" : rec.zscore <= -1.0 ? "text-red-400" : "text-zinc-500";
+
+    const ciDiff = ci95(Math.abs(rec.wr_diff), rec.games);
+    const ciExcess = ci95(Math.abs(rec.excess_wr), rec.games);
+
     return (
       <div className="flex items-center gap-2 py-1 border-b border-zinc-800/50 last:border-0">
         <div className="w-7 h-5 rounded overflow-hidden bg-zinc-800 shrink-0">
@@ -110,33 +123,43 @@ export default function DraftApp({ heroes, draftData: serverDraftData, itemNames
         </div>
         <span className="text-xs text-zinc-300 truncate flex-1">{name}</span>
         <span className={`text-xs font-mono shrink-0 w-10 text-right ${buyColor}`}>{rec.buy_rate_lift.toFixed(1)}x</span>
-        <span className={`text-xs font-mono shrink-0 w-12 text-right ${diffColor}`}>
-          {diffSign}{(rec.wr_diff * 100).toFixed(1)}%
+        <span className={`text-xs font-mono shrink-0 ${ci ? "w-20" : "w-12"} text-right ${diffColor}`}>
+          {diffSign}{(rec.wr_diff * 100).toFixed(1)}%{ci && <span className="text-zinc-600"> ±{(ciDiff * 100).toFixed(1)}</span>}
         </span>
-        <span className={`text-xs font-mono shrink-0 w-12 text-right ${excessColor}`}>
-          {excessSign}{(rec.excess_wr * 100).toFixed(1)}%
+        <span className={`text-xs font-mono shrink-0 ${ci ? "w-20" : "w-12"} text-right ${excessColor}`}>
+          {excessSign}{(rec.excess_wr * 100).toFixed(1)}%{ci && <span className="text-zinc-600"> ±{(ciExcess * 100).toFixed(1)}</span>}
         </span>
         <span className={`text-xs font-mono shrink-0 w-8 text-right ${zColor}`}>
           {rec.zscore >= 0 ? "+" : ""}{rec.zscore.toFixed(1)}
         </span>
+        {ci && (
+          <span className="text-xs text-zinc-600 font-mono shrink-0 w-12 text-right">({rec.games.toLocaleString()})</span>
+        )}
       </div>
     );
   }
 
   function HeroRecs({ hero }: { hero: OpenDotaHero }) {
     const items = recs.get(hero.id);
-    const [sortKey, setSortKey] = useState<"wr_diff" | "buy_rate_lift" | "excess_wr" | "zscore">("excess_wr");
+    const [sortKey, setSortKey] = useState<SortKey>("excess_wr");
     const [ascending, setAscending] = useState(false);
 
     if (!items || items.length === 0) return null;
 
-    const sorted = [...items].sort((a, b) => {
+    const filtered = items.filter(r =>
+      (!filterBuy || r.buy_rate_lift >= 1.0) &&
+      (!filterWr || r.wr_diff >= 0) &&
+      (!filterExcess || r.excess_wr >= 0) &&
+      (!filterZ || r.zscore >= 0)
+    );
+
+    const sorted = [...filtered].sort((a, b) => {
       const av = a[sortKey];
       const bv = b[sortKey];
       return ascending ? av - bv : bv - av;
     });
 
-    function toggleSort(key: "wr_diff" | "buy_rate_lift" | "excess_wr" | "zscore") {
+    function toggleSort(key: SortKey) {
       if (key === sortKey) setAscending(!ascending);
       else { setSortKey(key); setAscending(false); }
     }
@@ -151,6 +174,7 @@ export default function DraftApp({ heroes, draftData: serverDraftData, itemNames
             <img src={heroImgUrl(hero.name)} alt={hero.localized_name} className="w-full h-full object-cover object-top" loading="lazy" />
           </div>
           <span className="text-sm font-medium">{hero.localized_name}</span>
+          <span className="text-[10px] text-zinc-600 ml-auto">{filtered.length} items</span>
         </div>
         <div className="flex items-center gap-2 pb-1 mb-1 border-b border-zinc-800 text-[10px] text-zinc-600 font-mono">
           <span className="w-7 shrink-0" />
@@ -160,22 +184,38 @@ export default function DraftApp({ heroes, draftData: serverDraftData, itemNames
             Buy{arrow("buy_rate_lift")}
           </button>
           <button onClick={() => toggleSort("wr_diff")}
-            className={`shrink-0 w-12 text-right cursor-pointer hover:text-zinc-300 ${sortKey === "wr_diff" ? "text-zinc-300" : ""}`}>
+            className={`shrink-0 ${showCi ? "w-20" : "w-12"} text-right cursor-pointer hover:text-zinc-300 ${sortKey === "wr_diff" ? "text-zinc-300" : ""}`}>
             WR Diff{arrow("wr_diff")}
           </button>
           <button onClick={() => toggleSort("excess_wr")}
-            className={`shrink-0 w-12 text-right cursor-pointer hover:text-zinc-300 ${sortKey === "excess_wr" ? "text-zinc-300" : ""}`}>
+            className={`shrink-0 ${showCi ? "w-20" : "w-12"} text-right cursor-pointer hover:text-zinc-300 ${sortKey === "excess_wr" ? "text-zinc-300" : ""}`}>
             Excess{arrow("excess_wr")}
           </button>
           <button onClick={() => toggleSort("zscore")}
             className={`shrink-0 w-8 text-right cursor-pointer hover:text-zinc-300 ${sortKey === "zscore" ? "text-zinc-300" : ""}`}>
             Z{arrow("zscore")}
           </button>
+          {showCi && (
+            <button onClick={() => toggleSort("games")}
+              className={`shrink-0 w-12 text-right cursor-pointer hover:text-zinc-300 ${sortKey === "games" ? "text-zinc-300" : ""}`}>
+              N{arrow("games")}
+            </button>
+          )}
         </div>
         <div className="max-h-[400px] overflow-y-auto">
-          {sorted.map(rec => <ItemCard key={rec.item_id} rec={rec} />)}
+          {sorted.map(rec => <ItemCard key={rec.item_id} rec={rec} showCi={showCi} />)}
+          {sorted.length === 0 && <p className="text-zinc-600 text-xs text-center py-4">No items match filters</p>}
         </div>
       </div>
+    );
+  }
+
+  function FilterBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+    return (
+      <button onClick={onClick}
+        className={`px-2 py-0.5 text-[10px] rounded border transition-colors ${
+          active ? "border-zinc-600 text-zinc-300 bg-zinc-800" : "border-zinc-800 text-zinc-600 hover:text-zinc-400 hover:border-zinc-700"
+        }`}>{children}</button>
     );
   }
 
@@ -220,9 +260,14 @@ export default function DraftApp({ heroes, draftData: serverDraftData, itemNames
         {/* Item recommendations per hero */}
         {allHeroes.length > 0 && recs.size > 0 && (
           <>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-semibold uppercase tracking-widest text-zinc-500">Recommended Items</span>
               <div className="flex-1 h-px bg-zinc-800" />
+              <FilterBtn active={filterBuy} onClick={() => setFilterBuy(!filterBuy)}>Buy ≥ 1.0</FilterBtn>
+              <FilterBtn active={filterWr} onClick={() => setFilterWr(!filterWr)}>WR Diff ≥ 0</FilterBtn>
+              <FilterBtn active={filterExcess} onClick={() => setFilterExcess(!filterExcess)}>Excess ≥ 0</FilterBtn>
+              <FilterBtn active={filterZ} onClick={() => setFilterZ(!filterZ)}>Z ≥ 0</FilterBtn>
+              <FilterBtn active={showCi} onClick={() => setShowCi(!showCi)}>CI & N</FilterBtn>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {allHeroes.map(hero => <HeroRecs key={hero.id} hero={hero} />)}
