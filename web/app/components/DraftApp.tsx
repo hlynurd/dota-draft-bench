@@ -20,6 +20,63 @@ function ci95(p: number, n: number): number {
   return 1.96 * Math.sqrt(p * (1 - p) / n);
 }
 
+// ─── IndexedDB cache for draft-data.json ─────────────────────────────────────
+
+const DB_NAME = "dota-draft-bench";
+const STORE_NAME = "cache";
+const CACHE_KEY = "draft-data";
+
+function openDB(): Promise<IDBDatabase> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(STORE_NAME);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function getCachedData(): Promise<DraftData | null> {
+  try {
+    const db = await openDB();
+    return new Promise((resolve) => {
+      const tx = db.transaction(STORE_NAME, "readonly");
+      const req = tx.objectStore(STORE_NAME).get(CACHE_KEY);
+      req.onsuccess = () => resolve(req.result ?? null);
+      req.onerror = () => resolve(null);
+    });
+  } catch { return null; }
+}
+
+async function setCachedData(data: DraftData): Promise<void> {
+  try {
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, "readwrite");
+    tx.objectStore(STORE_NAME).put(data, CACHE_KEY);
+  } catch { /* ignore quota errors */ }
+}
+
+async function loadDraftData(onUpdate: (data: DraftData) => void): Promise<DraftData> {
+  // Try IndexedDB cache first for instant load
+  const cached = await getCachedData();
+  if (cached) {
+    // Use cache immediately, refresh in background
+    fetch("/draft-data.json").then(r => r.json()).then((fresh: DraftData) => {
+      if (fresh.ts !== cached.ts) {
+        setCachedData(fresh);
+        onUpdate(fresh);
+      }
+    }).catch(() => {});
+    return cached;
+  }
+  // No cache — must fetch
+  const res = await fetch("/draft-data.json");
+  const fresh: DraftData = await res.json();
+  setCachedData(fresh);
+  return fresh;
+}
+
+// ─── Component ───────────────────────────────────────────────────────────────
+
 export default function DraftApp({ heroes, draftData: serverDraftData, itemNames }: Props) {
   const [radiant, setRadiant] = useState<(OpenDotaHero | null)[]>(Array(5).fill(null));
   const [dire, setDire] = useState<(OpenDotaHero | null)[]>(Array(5).fill(null));
@@ -36,10 +93,13 @@ export default function DraftApp({ heroes, draftData: serverDraftData, itemNames
 
   useEffect(() => {
     if (serverDraftData) return;
-    fetch("/draft-data.json")
-      .then(r => r.json())
-      .then((data: DraftData) => { setClientDraftData(data); setLoading(false); })
-      .catch(() => setLoading(false));
+    loadDraftData((fresh) => setClientDraftData(fresh))
+      .then((data) => { setClientDraftData(data); setLoading(false); })
+      .catch(() => {
+        fetch("/draft-data.json").then(r => r.json())
+          .then((data: DraftData) => { setClientDraftData(data); setLoading(false); })
+          .catch(() => setLoading(false));
+      });
   }, [serverDraftData]);
 
   const draftData = clientDraftData;

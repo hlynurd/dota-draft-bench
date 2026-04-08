@@ -16,7 +16,7 @@ from collections import defaultdict
 NDJSON_PATH = Path(__file__).resolve().parent.parent.parent / "dota-items" / "data" / "matches.ndjson"
 OUTPUT_PATH = Path(__file__).resolve().parent.parent / "web" / "public" / "draft-data.json"
 
-MIN_GAMES = 3  # minimum games for inclusion in output
+MIN_GAMES = 10  # minimum games for inclusion in output
 
 
 def main():
