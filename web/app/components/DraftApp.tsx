@@ -24,7 +24,6 @@ function ci95(p: number, n: number): number {
 
 const DB_NAME = "dota-draft-bench";
 const STORE_NAME = "cache";
-const CACHE_KEY = "draft-data";
 
 function openDB(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -35,43 +34,38 @@ function openDB(): Promise<IDBDatabase> {
   });
 }
 
-async function getCachedData(): Promise<DraftData | null> {
+async function getCachedData(key: string): Promise<DraftData | null> {
   try {
     const db = await openDB();
     return new Promise((resolve) => {
       const tx = db.transaction(STORE_NAME, "readonly");
-      const req = tx.objectStore(STORE_NAME).get(CACHE_KEY);
+      const req = tx.objectStore(STORE_NAME).get(key);
       req.onsuccess = () => resolve(req.result ?? null);
       req.onerror = () => resolve(null);
     });
   } catch { return null; }
 }
 
-async function setCachedData(data: DraftData): Promise<void> {
+async function setCachedData(key: string, data: DraftData): Promise<void> {
   try {
     const db = await openDB();
     const tx = db.transaction(STORE_NAME, "readwrite");
-    tx.objectStore(STORE_NAME).put(data, CACHE_KEY);
+    tx.objectStore(STORE_NAME).put(data, key);
   } catch { /* ignore quota errors */ }
 }
 
-async function loadDraftData(onUpdate: (data: DraftData) => void): Promise<DraftData> {
-  // Try IndexedDB cache first for instant load
-  const cached = await getCachedData();
+async function loadJsonWithCache(filename: string, onUpdate: (data: DraftData) => void): Promise<DraftData> {
+  const cacheKey = filename;
+  const cached = await getCachedData(cacheKey);
   if (cached) {
-    // Use cache immediately, refresh in background
-    fetch("/draft-data.json").then(r => r.json()).then((fresh: DraftData) => {
-      if (fresh.ts !== cached.ts) {
-        setCachedData(fresh);
-        onUpdate(fresh);
-      }
+    fetch(`/${filename}`).then(r => r.json()).then((fresh: DraftData) => {
+      if (fresh.ts !== cached.ts) { setCachedData(cacheKey, fresh); onUpdate(fresh); }
     }).catch(() => {});
     return cached;
   }
-  // No cache — must fetch
-  const res = await fetch("/draft-data.json");
+  const res = await fetch(`/${filename}`);
   const fresh: DraftData = await res.json();
-  setCachedData(fresh);
+  setCachedData(cacheKey, fresh);
   return fresh;
 }
 
@@ -81,7 +75,9 @@ export default function DraftApp({ heroes, draftData: serverDraftData, itemNames
   const [radiant, setRadiant] = useState<(OpenDotaHero | null)[]>(Array(5).fill(null));
   const [dire, setDire] = useState<(OpenDotaHero | null)[]>(Array(5).fill(null));
   const [picker, setPicker] = useState<{ side: Side; slot: number } | null>(null);
-  const [clientDraftData, setClientDraftData] = useState<DraftData | null>(serverDraftData);
+  const [allRankData, setAllRankData] = useState<DraftData | null>(serverDraftData);
+  const [legendData, setLegendData] = useState<DraftData | null>(null);
+  const [legendOnly, setLegendOnly] = useState(false);
   const [loading, setLoading] = useState(!serverDraftData);
 
   // Global filters
@@ -91,16 +87,26 @@ export default function DraftApp({ heroes, draftData: serverDraftData, itemNames
   const [filterZ, setFilterZ] = useState(false);
   const [showCi, setShowCi] = useState(false);
 
+  // Load all-rank data
   useEffect(() => {
     if (serverDraftData) return;
-    loadDraftData((fresh) => setClientDraftData(fresh))
-      .then((data) => { setClientDraftData(data); setLoading(false); })
+    loadJsonWithCache("draft-data.json", (fresh) => setAllRankData(fresh))
+      .then((data) => { setAllRankData(data); setLoading(false); })
       .catch(() => {
         fetch("/draft-data.json").then(r => r.json())
-          .then((data: DraftData) => { setClientDraftData(data); setLoading(false); })
+          .then((data: DraftData) => { setAllRankData(data); setLoading(false); })
           .catch(() => setLoading(false));
       });
   }, [serverDraftData]);
+
+  // Load Legend+ data (small file, no rush)
+  useEffect(() => {
+    loadJsonWithCache("draft-data-legend.json", (fresh) => setLegendData(fresh))
+      .then((data) => setLegendData(data))
+      .catch(() => {}); // Legend data is optional
+  }, []);
+
+  const clientDraftData = legendOnly && legendData ? legendData : allRankData;
 
   const draftData = clientDraftData;
   const indexed = useMemo(() => draftData ? indexDraftData(draftData) : null, [draftData]);
@@ -323,6 +329,12 @@ export default function DraftApp({ heroes, draftData: serverDraftData, itemNames
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-semibold uppercase tracking-widest text-zinc-500">Recommended Items</span>
               <div className="flex-1 h-px bg-zinc-800" />
+              {legendData && (
+                <button onClick={() => setLegendOnly(!legendOnly)}
+                  className={`px-2 py-0.5 text-[10px] rounded border transition-colors ${
+                    legendOnly ? "border-yellow-700 text-yellow-400 bg-yellow-950" : "border-zinc-800 text-zinc-600 hover:text-zinc-400 hover:border-zinc-700"
+                  }`}>{legendOnly ? "Legend+" : "All ranks"}</button>
+              )}
               <FilterBtn active={filterBuy} onClick={() => setFilterBuy(!filterBuy)}>Buy ≥ 1.0</FilterBtn>
               <FilterBtn active={filterWr} onClick={() => setFilterWr(!filterWr)}>WR Diff ≥ 0</FilterBtn>
               <FilterBtn active={filterExcess} onClick={() => setFilterExcess(!filterExcess)}>Excess ≥ 0</FilterBtn>

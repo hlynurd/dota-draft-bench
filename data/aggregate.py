@@ -20,15 +20,34 @@ MIN_GAMES = 10  # minimum games for inclusion in output
 
 
 def main():
-    src = Path(sys.argv[1]) if len(sys.argv) > 1 else NDJSON_PATH
-    dst = Path(sys.argv[2]) if len(sys.argv) > 2 else OUTPUT_PATH
+    # Parse flags
+    min_rank = 0
+    output_override = None
+    positional = []
+    i = 1
+    while i < len(sys.argv):
+        if sys.argv[i] == "--min-rank" and i + 1 < len(sys.argv):
+            min_rank = int(sys.argv[i + 1])
+            i += 2
+        elif sys.argv[i] == "--output" and i + 1 < len(sys.argv):
+            output_override = sys.argv[i + 1]
+            i += 2
+        else:
+            positional.append(sys.argv[i])
+            i += 1
 
-    print(f"Loading {src}...")
+    src = Path(positional[0]) if len(positional) > 0 else NDJSON_PATH
+    dst = Path(output_override) if output_override else (Path(positional[1]) if len(positional) > 1 else OUTPUT_PATH)
+
+    print(f"Loading {src}..." + (f" (min_rank={min_rank})" if min_rank else ""))
     matches = []
     with open(src) as f:
         for line in f:
             if line.strip():
-                matches.append(json.loads(line))
+                row = json.loads(line)
+                if min_rank > 0 and row.get("k", 0) < min_rank:
+                    continue
+                matches.append(row)
     print(f"Loaded {len(matches):,} matches")
 
     # Accumulators
